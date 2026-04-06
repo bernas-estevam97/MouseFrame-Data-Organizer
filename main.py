@@ -106,8 +106,11 @@ def process_file_adapted(input_file, id_to_color_map, output_dir=None, logger=pr
     original_name = os.path.splitext(os.path.basename(input_file))[0]
     timestamp = datetime.now().strftime("%H-%M-%S")
     
+    # Change filename suffix based on whether colors are being applied
+    file_suffix = "Colorized" if id_to_color_map else "Organized"
+    
     target_directory = output_dir if output_dir else os.path.dirname(input_file)
-    output_file = os.path.join(target_directory, f"{original_name}_Colorized_{timestamp}.xlsx")
+    output_file = os.path.join(target_directory, f"{original_name}_{file_suffix}_{timestamp}.xlsx")
 
     logger("Building new workbook and applying styles...", ft.Colors.BLUE_200)
     wb = Workbook()
@@ -152,22 +155,24 @@ def process_file_adapted(input_file, id_to_color_map, output_dir=None, logger=pr
         except ValueError:
             continue
 
-        for row in ws.iter_rows(min_row=2, max_row=ws.max_row):
-            table_id_cell = row[table_id_col_index - 1]
-            table_id_val = str(table_id_cell.value).strip()
+        # Only iterate for styling if the user actually defined colors
+        if id_to_color_map:
+            for row in ws.iter_rows(min_row=2, max_row=ws.max_row):
+                table_id_cell = row[table_id_col_index - 1]
+                table_id_val = str(table_id_cell.value).strip()
 
-            matched_hex = None
-            for user_id, hex_color in id_to_color_map.items():
-                if user_id in table_id_val:
-                    matched_hex = hex_color
-                    break
+                matched_hex = None
+                for user_id, hex_color in id_to_color_map.items():
+                    if user_id in table_id_val:
+                        matched_hex = hex_color
+                        break
 
-            if matched_hex:
-                fill = PatternFill(start_color=matched_hex, end_color=matched_hex, fill_type="solid")
-                font = get_dynamic_font(matched_hex)
-                for cell in row:
-                    cell.fill = fill
-                    cell.font = font
+                if matched_hex:
+                    fill = PatternFill(start_color=matched_hex, end_color=matched_hex, fill_type="solid")
+                    font = get_dynamic_font(matched_hex)
+                    for cell in row:
+                        cell.fill = fill
+                        cell.font = font
 
     wb.save(output_file)
     logger(f"Saved: {os.path.basename(output_file)}", ft.Colors.GREEN_400)
@@ -214,7 +219,6 @@ def main(page: ft.Page):
 
 
     # --- THEME TOGGLE LOGIC ---
-    # Helper to figure out what the screen actually looks like right now
     def get_effective_theme():
         if page.theme_mode == ft.ThemeMode.SYSTEM:
             return ft.ThemeMode.DARK if page.platform_brightness == ft.Brightness.DARK else ft.ThemeMode.LIGHT
@@ -223,7 +227,6 @@ def main(page: ft.Page):
     def toggle_theme(e):
         current_theme = get_effective_theme()
         
-        # Override the system setting with the explicit opposite theme
         if current_theme == ft.ThemeMode.LIGHT:
             page.theme_mode = ft.ThemeMode.DARK
             theme_btn.icon = ft.icons.Icons.LIGHT_MODE
@@ -233,7 +236,6 @@ def main(page: ft.Page):
             
         page.update()
 
-    # Set the initial icon to match the system's starting state
     starting_theme = get_effective_theme()
     starting_icon = ft.icons.Icons.LIGHT_MODE if starting_theme == ft.ThemeMode.DARK else ft.icons.Icons.DARK_MODE
 
@@ -246,7 +248,7 @@ def main(page: ft.Page):
 
     # --- TUTORIAL & HELP MODAL ---
     tutorial_md = """
-### Welcome to the Excel Group Colorizer!
+### Welcome to the Mouseframe Group Organizer!
 
 This tool allows you to automatically map colors and styles to specific animal IDs across your Excel datasets.
 
@@ -255,13 +257,14 @@ This tool allows you to automatically map colors and styles to specific animal I
 * *OR* click **Select Entire Folder** to bulk-load a whole directory of files.
 
 **Step 2: Output Destination (Optional)**
-* By default, the app saves the colorized files in the same folder as the originals. You can override this by picking a specific folder.
+* By default, the app saves the files in the same folder as the originals. You can override this by picking a specific folder.
 
-**Step 3: Create Your Groups**
+**Step 3: Create Your Groups (Optional)**
 * Type a group name (e.g., *Sick Male*).
 * Click the colored square to pick the exact background color for this group in Excel.
 * Type the Animal IDs separated by commas (e.g., `4023, 4036`).
 * Click **Add Group**.
+* *Note: If you skip this step, the app will simply extract and organize your data into clean sheets without adding any background colors.*
 
 **Step 4: Process**
 * Hit **Process Data**. The app will safely generate *copies* of your files (your originals are never overwritten!) and log the results in the terminal below.
@@ -270,11 +273,9 @@ This tool allows you to automatically map colors and styles to specific animal I
     help_dialog = ft.AlertDialog(
         title=ft.Row([ft.Icon(ft.icons.Icons.HELP), ft.Text("How to Use")]),
         content=ft.Container(
-            # Wrap the Markdown in a Column and turn on scrolling!
             content=ft.Column(
                 controls=[ft.Markdown(tutorial_md, selectable=True, extension_set="gitHubWeb")],
                 scroll=ft.ScrollMode.AUTO,
-                
             ),
             width=500,  
             height=400, 
@@ -293,8 +294,7 @@ This tool allows you to automatically map colors and styles to specific animal I
 
     header_row = ft.Row(
         [
-            ft.Text("Excel Group Colorizer", size=28, weight=ft.FontWeight.BOLD),
-            # Grouping the Help and Theme buttons together on the right
+            ft.Text("Mouseframe data organizer", size=28, weight=ft.FontWeight.BOLD),
             ft.Container(
                 content=ft.Row([help_btn, theme_btn]), 
                 padding=ft.Padding.only(right=15)
@@ -327,7 +327,6 @@ This tool allows you to automatically map colors and styles to specific animal I
             selected_file_text.value = "No files selected"
             selected_file_text.color = ft.Colors.RED
             selected_file_text.italic = True
-            #log_msg("File selection cancelled.", ft.Colors.ORANGE_400)
             
         page.update()
 
@@ -335,11 +334,10 @@ This tool allows you to automatically map colors and styles to specific animal I
         folder = await ft.FilePicker().get_directory_path(dialog_title="Select Folder containing Excel files")
         
         if folder:
-            # Scan the folder for valid Excel files
             valid_extensions = ('.xlsx', '.xlsm')
             found_files = [
                 os.path.join(folder, f) for f in os.listdir(folder) 
-                if f.lower().endswith(valid_extensions) and not f.startswith('~') # Ignore temp open excel files
+                if f.lower().endswith(valid_extensions) and not f.startswith('~')
             ]
             
             selected_files.clear()
@@ -387,7 +385,6 @@ This tool allows you to automatically map colors and styles to specific animal I
 
     color_picker = ColorPicker(color=selected_color["hex"], on_color_change=on_color_change)
 
-    # --- BULLETPROOF DIALOG LOGIC ---
     def close_color_dialog(e):
         color_dialog.open = False
         page.update()
@@ -402,7 +399,6 @@ This tool allows you to automatically map colors and styles to specific animal I
         actions=[ft.TextButton("Done", on_click=close_color_dialog)],
     )
     page.overlay.append(color_dialog)
-    # --------------------------------
 
     groups_list = ft.Column(spacing=10)
 
@@ -433,7 +429,7 @@ This tool allows you to automatically map colors and styles to specific animal I
                         ft.IconButton(
                             icon=ft.icons.Icons.DELETE_OUTLINE, icon_color=ft.Colors.RED_400,
                             tooltip="Remove Group",
-                            on_click=lambda e, idx=i: delete_group(idx) 
+                            on_click=lambda e, idx=i: delete_group(idx), style=hover_style 
                         )
                     ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN)
                 )
@@ -516,7 +512,7 @@ This tool allows you to automatically map colors and styles to specific animal I
                 icon=ft.icons.Icons.UPLOAD_FILE, 
                 on_click=handle_pick_files, style=hover_style 
             ),
-            ft.Text(" OR ", weight=ft.FontWeight.BOLD, color=ft.Colors.GREY_500), # Simple divider
+            ft.Text(" OR ", weight=ft.FontWeight.BOLD, color=ft.Colors.GREY_500),
             ft.Button(
                 "Select Entire Folder", 
                 icon=ft.icons.Icons.FOLDER, 
@@ -537,7 +533,8 @@ This tool allows you to automatically map colors and styles to specific animal I
         ]),
         ft.Divider(),
 
-        ft.Text("3. Create Groups & Assign Colors", size=18, weight=ft.FontWeight.BOLD),
+        # --- CHANGED HERE: Marked as Optional ---
+        ft.Text("3. Create Groups & Assign Colors (Optional)", size=18, weight=ft.FontWeight.BOLD),
         ft.Row([
             group_name_input,
             ft.Text("Select Color:"),
@@ -546,7 +543,7 @@ This tool allows you to automatically map colors and styles to specific animal I
                 on_tap=open_color_dialog, mouse_cursor='click'
             ),
             ft.Button("Add Group", icon=ft.icons.Icons.ADD, on_click=add_group, bgcolor=ft.Colors.BLUE, color=ft.Colors.WHITE, style=hover_style)
-        ], alignment=ft.MainAxisAlignment.START, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+        ], alignment=ft.MainAxisAlignment.START, vertical_alignment=ft.CrossAxisAlignment.CENTER, margin=ft.Margin(0, 0, 20,0)),
         
         ft.Container(height=10),
         groups_list,
